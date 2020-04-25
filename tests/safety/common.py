@@ -36,13 +36,6 @@ def package_can_msg(msg):
 def make_msg(bus, addr, length=8):
   return package_can_msg([addr, 0, b'\x00'*length, bus])
 
-def interceptor_msg(gas, addr):
-  to_send = make_msg(0, addr, 6)
-  gas2 = gas * 2
-  to_send[0].RDLR = ((gas & 0xff) << 8) | ((gas & 0xff00) >> 8) | \
-                    ((gas2 & 0xff) << 24) | ((gas2 & 0xff00) << 8)
-  return to_send
-
 class CANPackerPanda(CANPacker):
   def make_can_msg_panda(self, name_or_addr, bus, values, counter=-1):
     msg = self.make_can_msg(name_or_addr, bus, values, counter=-1)
@@ -51,6 +44,7 @@ class CANPackerPanda(CANPacker):
 class PandaSafetyTest(unittest.TestCase):
   TX_MSGS = None
   STANDSTILL_THRESHOLD = None
+  GAS_PRESSED_THRESHOLD = 0
   RELAY_MALFUNCTION_ADDR = None
   RELAY_MALFUNCTION_BUS = None
   FWD_BLACKLISTED_ADDRS = {} # {bus: [addr]}
@@ -78,6 +72,10 @@ class PandaSafetyTest(unittest.TestCase):
 
   @abc.abstractmethod
   def _gas_msg(self, speed):
+    pass
+
+  @abc.abstractmethod
+  def _pcm_status_msg(self, enable):
     pass
 
   # ***** standard tests for all safety modes *****
@@ -119,11 +117,12 @@ class PandaSafetyTest(unittest.TestCase):
     self.assertTrue(self.safety.get_controls_allowed())
     self.safety.set_controls_allowed(0)
     self.assertFalse(self.safety.get_controls_allowed())
-  
+
   def test_prev_gas(self):
-    for pressed in [True, False]:
+    self.assertFalse(self.safety.get_gas_pressed_prev())
+    for pressed in [self.GAS_PRESSED_THRESHOLD+1, 0]:
       self._rx(self._gas_msg(pressed))
-      self.assertEqual(pressed, self.safety.get_gas_pressed_prev())
+      self.assertEqual(bool(pressed), self.safety.get_gas_pressed_prev())
 
   def test_allow_engage_with_gas_pressed(self):
     self._rx(self._gas_msg(1))
@@ -136,15 +135,34 @@ class PandaSafetyTest(unittest.TestCase):
   def test_disengage_on_gas(self):
     self._rx(self._gas_msg(0))
     self.safety.set_controls_allowed(True)
-    self._rx(self._gas_msg(1))
+    self._rx(self._gas_msg(self.GAS_PRESSED_THRESHOLD+1))
     self.assertFalse(self.safety.get_controls_allowed())
 
   def test_unsafe_mode_no_disengage_on_gas(self):
     self._rx(self._gas_msg(0))
     self.safety.set_controls_allowed(True)
     self.safety.set_unsafe_mode(UNSAFE_MODE.DISABLE_DISENGAGE_ON_GAS)
-    self._rx(self._gas_msg(1))
+    self._rx(self._gas_msg(self.GAS_PRESSED_THRESHOLD+1))
     self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_prev_brake(self):
+    self.assertFalse(self.safety.get_brake_pressed_prev())
+    for pressed in [True, False]:
+      self._rx(self._brake_msg(not pressed))
+      self.assertEqual(not pressed, self.safety.get_brake_pressed_prev())
+      self._rx(self._brake_msg(pressed))
+      self.assertEqual(pressed, self.safety.get_brake_pressed_prev())
+
+  def test_enable_control_allowed_from_cruise(self):
+    self._rx(self._pcm_status_msg(False))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self._rx(self._pcm_status_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_disable_control_allowed_from_cruise(self):
+    self.safety.set_controls_allowed(1)
+    self._rx(self._pcm_status_msg(False))
+    self.assertFalse(self.safety.get_controls_allowed())
 
   def test_allow_brake_at_zero_speed(self):
     # Brake was already pressed

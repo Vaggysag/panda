@@ -14,6 +14,14 @@ const int HONDA_BOSCH_NO_GAS_VALUE = -30000; // value sent when not requesting g
 const int HONDA_BOSCH_GAS_MAX = 2000;
 const int HONDA_BOSCH_ACCEL_MIN = -350; // max braking == -3.5m/s2
 
+// Roughly calculated using the offsets in openpilot +5%:
+// In openpilot: ((gas1_norm + gas2_norm)/2) > 15
+// gas_norm1 = ((gain_dbc1*gas1) + offset_dbc)
+// gas_norm2 = ((gain_dbc2*gas2) + offset_dbc)
+// assuming that 2*(gain_dbc1*gas1) == (gain_dbc2*gas2)
+// In this safety: ((gas1 + (gas2/2))/2) > THRESHOLD
+#define HONDA_GET_INTERCEPTOR(msg) (((GET_BYTE((msg), 0) << 8) + GET_BYTE((msg), 1) + ((GET_BYTE((msg), 2) << 8) + GET_BYTE((msg), 3)) / 2 ) / 2) // avg between 2 tracks
+
 // Nidec and Bosch giraffe have pt on bus 0
 AddrCheckStruct honda_rx_checks[] = {
   {.addr = {0x1A6, 0x296}, .bus = 0, .check_checksum = true, .max_counter = 3U, .expected_timestep = 40000U},
@@ -125,7 +133,7 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     // length check because bosch hardware also uses this id (0x201 w/ len = 8)
     if ((addr == 0x201) && (len == 6)) {
       gas_interceptor_detected = 1;
-      int gas_interceptor = GET_INTERCEPTOR(to_push);
+      int gas_interceptor = HONDA_GET_INTERCEPTOR(to_push);
       if (!unsafe_allow_gas && (gas_interceptor > HONDA_GAS_INTERCEPTOR_THRESHOLD) &&
           (gas_interceptor_prev <= HONDA_GAS_INTERCEPTOR_THRESHOLD)) {
         controls_allowed = 0;

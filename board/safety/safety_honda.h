@@ -12,7 +12,7 @@ const AddrBus HONDA_BH_TX_MSGS[] = {{0xE4, 0}, {0xE4, 1}, {0x1DF, 1}, {0x1EF, 1}
 const int HONDA_GAS_INTERCEPTOR_THRESHOLD = 328;  // ratio between offset and gain from dbc file
 const int HONDA_BOSCH_NO_GAS_VALUE = -30000; // value sent when not requesting gas
 const int HONDA_BOSCH_GAS_MAX = 2000;
-const int HONDA_BOSCH_ACCEL_MIN = -350; // max braking == -3.5m/s2
+const int HONDA_BOSCH_ACCEL_MIN = -420; // max braking == -4.2m/s2
 
 // Roughly calculated using the offsets in openpilot +5%:
 // In openpilot: ((gas1_norm + gas2_norm)/2) > 15

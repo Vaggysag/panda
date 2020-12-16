@@ -1,3 +1,5 @@
+#include "safety_teslaradar.h"
+
 // board enforces
 //   in-state
 //      accel set/resume
@@ -9,7 +11,7 @@
 const CanMsg HONDA_N_TX_MSGS[] = {{0xE4, 0, 5}, {0x194, 0, 4}, {0x1FA, 0, 8}, {0x200, 0, 6}, {0x30C, 0, 8}, {0x33D, 0, 5}};
 const CanMsg HONDA_BG_TX_MSGS[] = {{0xE4, 2, 5}, {0xE5, 2, 8}, {0x296, 0, 4}, {0x33D, 2, 5}};  // Bosch Giraffe
 const CanMsg HONDA_BH_TX_MSGS[] = {{0xE4, 0, 5}, {0xE5, 0, 8}, {0x296, 1, 4}, {0x33D, 0, 5}};  // Bosch Harness
-const CanMsg HONDA_BG_LONG_TX_MSGS[] = {{0xE4, 0, 5}, {0x1DF, 0, 8}, {0x1EF, 0, 8}, {0x1FA, 0, 8}, {0x30C, 0, 8}, {0x33D, 0, 5}, {0x39F, 0, 8}, {0x18DAB0F1, 0, 8}};  // Bosch Giraffe w/ gas and brakes
+const CanMsg HONDA_BG_LONG_TX_MSGS[] = {{0xE4, 0, 5}, {0x1DF, 0, 8}, {0x1EF, 0, 8}, {0x1FA, 0, 8}, {0x30C, 0, 8}, {0x33D, 0, 5}, {0x39F, 0, 8}, {0x560, 2, 8}, {0x18DAB0F1, 0, 8}};  // Bosch Giraffe w/ gas and brakes
 const CanMsg HONDA_BH_LONG_TX_MSGS[] = {{0xE4, 1, 5}, {0x1DF, 1, 8}, {0x1EF, 1, 8}, {0x1FA, 1, 8}, {0x30C, 1, 8}, {0x33D, 1, 5}, {0x39F, 1, 8}, {0x18DAB0F1, 1, 8}};  // Bosch Harness w/ gas and brakes
 
 // Roughly calculated using the offsets in openpilot +5%:
@@ -88,6 +90,8 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     valid = addr_safety_check(to_push, honda_rx_checks, HONDA_RX_CHECKS_LEN,
                               honda_get_checksum, honda_compute_checksum, honda_get_counter);
   }
+  
+  teslaradar_rx_hook(to_push);
 
   if (valid) {
     int addr = GET_ADDR(to_push);
@@ -98,6 +102,11 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     if (addr == 0x158) {
       // first 2 bytes
       vehicle_moving = GET_BYTE(to_push, 0) | GET_BYTE(to_push, 1);
+    }
+    
+    //speed for radar
+    if (addr == 0x309) {
+      actual_speed_kph = (((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
     }
 
     // state machine to enter and exit controls
@@ -186,6 +195,51 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
   int tx = 1;
   int addr = GET_ADDR(to_send);
   int bus = GET_BUS(to_send);
+  
+  if ((to_send->RIR >> 21) == 0x560) { // 0x560 is Tesla radar VIN
+   int id = (to_send->RDLR & 0xFF);
+   int radarVin_b1 = ((to_send->RDLR >> 8) & 0xFF);
+   int radarVin_b2 = ((to_send->RDLR >> 16) & 0xFF);
+   int radarVin_b3 = ((to_send->RDLR >> 24) & 0xFF);
+   int radarVin_b4 = (to_send->RDHR & 0xFF);
+   int radarVin_b5 = ((to_send->RDHR >> 8) & 0xFF);
+   int radarVin_b6 = ((to_send->RDHR >> 16) & 0xFF);
+   int radarVin_b7 = ((to_send->RDHR >> 24) & 0xFF);
+   if (id == 0) {
+     tesla_radar_should_send = (radarVin_b2 & 0x01);
+     radarPosition =  ((radarVin_b2 >> 1) & 0x03);
+     radarEpasType = ((radarVin_b2 >> 3) & 0x07);
+     tesla_radar_trigger_message_id = (radarVin_b3 << 8) + radarVin_b4;
+     tesla_radar_can = radarVin_b1;
+     radar_VIN[0] = radarVin_b5;
+     radar_VIN[1] = radarVin_b6;
+     radar_VIN[2] = radarVin_b7;
+     tesla_radar_vin_complete = tesla_radar_vin_complete | 1;
+   }
+   if (id == 1) {
+     radar_VIN[3] = radarVin_b1;
+     radar_VIN[4] = radarVin_b2;
+     radar_VIN[5] = radarVin_b3;
+     radar_VIN[6] = radarVin_b4;
+     radar_VIN[7] = radarVin_b5;
+     radar_VIN[8] = radarVin_b6;
+     radar_VIN[9] = radarVin_b7;
+     tesla_radar_vin_complete = tesla_radar_vin_complete | 2;
+   }
+   if (id == 2) {
+     radar_VIN[10] = radarVin_b1;
+     radar_VIN[11] = radarVin_b2;
+     radar_VIN[12] = radarVin_b3;
+     radar_VIN[13] = radarVin_b4;
+     radar_VIN[14] = radarVin_b5;
+     radar_VIN[15] = radarVin_b6;
+     radar_VIN[16] = radarVin_b7;
+     tesla_radar_vin_complete = tesla_radar_vin_complete | 4;
+   }
+   else {
+     return 0;
+   }
+ }
 
   if ((honda_hw == HONDA_BG_HW) && !honda_bosch_long) {
     tx = msg_allowed(to_send, HONDA_BG_TX_MSGS, sizeof(HONDA_BG_TX_MSGS)/sizeof(HONDA_BG_TX_MSGS[0]));
@@ -353,6 +407,10 @@ static int honda_bosch_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
   int bus_rdr_cam = (honda_hw == HONDA_BH_HW) ? 2 : 1;  // radar bus, camera side
   int bus_rdr_car = (honda_hw == HONDA_BH_HW) ? 0 : 2;  // radar bus, car side
 
+  if(bus_num == 2){
+    return -1;
+  }
+  
   if (!relay_malfunction) {
     if (bus_num == bus_rdr_car) {
       bus_fwd = bus_rdr_cam;

@@ -106,7 +106,7 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     
     //speed for radar
     if (addr == 0x309) {
-      actual_speed_kph = (((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
+      actual_speed_kph = (uint16_t)(((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
     }
 
     // state machine to enter and exit controls
@@ -196,7 +196,7 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
   int addr = GET_ADDR(to_send);
   int bus = GET_BUS(to_send);
   
-  if ((to_send->RIR >> 21) == 0x560) { // 0x560 is Tesla radar VIN
+  if (addr == 0x560) { // 0x560 is Tesla radar VIN
    int id = (to_send->RDLR & 0xFF);
    int radarVin_b1 = ((to_send->RDLR >> 8) & 0xFF);
    int radarVin_b2 = ((to_send->RDLR >> 16) & 0xFF);
@@ -407,9 +407,10 @@ static int honda_bosch_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
   int bus_rdr_cam = (honda_hw == HONDA_BH_HW) ? 2 : 1;  // radar bus, camera side
   int bus_rdr_car = (honda_hw == HONDA_BH_HW) ? 0 : 2;  // radar bus, car side
 
-  if(bus_num == 2){
-    return -1;
-  }
+  # block non-radar messages
+  # if(bus_num == 2){
+  #   return -1;
+  # }
   
   if (!relay_malfunction) {
     if (bus_num == bus_rdr_car) {

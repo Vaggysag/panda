@@ -1,13 +1,13 @@
 int tesla_radar_status = 0; //0-not present, 1-initializing, 2-active
 uint32_t tesla_last_radar_signal = 0;
-const int TESLA_RADAR_TIMEOUT = 1000000; // 1 second between real time checks
+const uint32_t TESLA_RADAR_TIMEOUT = 1000000; // 1 second between real time checks
 char radar_VIN[] = "5YJSA1E11GF150353"; //leave empty if your radar VIN matches the car VIN
 uint8_t tesla_radar_can = 2; // 0, 1 or 2 set from EON via fake message
 int tesla_radar_vin_complete = 0; //set to 7 when complete vin is received
 int tesla_radar_should_send = 0; //set to 1 from EON via fake message when we want to use it
 int tesla_radar_counter = 0; //counter to determine when to send messages
 uint32_t tesla_radar_trigger_message_id = 0x94; //id of the message
-int actual_speed_kph = 0; //use the rx_hook to set this to the car speed in kph; used by radar
+uint16_t actual_speed_kph = 0; //use the rx_hook to set this to the car speed in kph; used by radar
 int tesla_radar_config_message_id = 0x560; //message used to send VIN to Panda
 int radarPosition = 1;
 int radarEpasType = 3;
@@ -23,6 +23,8 @@ int tesla_radar_x199_id = 0;
 int tesla_radar_x169_id = 0;
 int tesla_radar_x119_id = 0;
 int tesla_radar_x109_id = 0;
+
+void can_send(CAN_FIFOMailBox_TypeDef *to_push, uint8_t bus_number, bool skip_tx_hook);
 
 static int add_tesla_crc(uint32_t MLB, uint32_t MHB , int msg_len) {
   //"""Calculate CRC8 using 1D poly, FF start, FF end"""
@@ -77,8 +79,6 @@ static int add_tesla_cksm2(uint32_t dl, uint32_t dh, int msg_id, int msg_len) {
   return add_tesla_cksm(&to_check,msg_id,msg_len);
 }
 
-void can_send(CAN_FIFOMailBox_TypeDef *to_push, uint8_t bus_number, bool skip_tx_hook);
-
 static void send_fake_message(uint32_t RIR, uint32_t RDTR,int msg_len, int msg_addr, uint8_t bus_num, uint32_t data_lo, uint32_t data_hi) {
   CAN_FIFOMailBox_TypeDef to_send;
   uint32_t addr_mask = 0x001FFFFF;
@@ -86,7 +86,7 @@ static void send_fake_message(uint32_t RIR, uint32_t RDTR,int msg_len, int msg_a
   to_send.RDTR = (RDTR & 0xFFFFFFF0) | msg_len;
   to_send.RDLR = data_lo;
   to_send.RDHR = data_hi;
-  can_send(&to_send, bus_num, true);
+  can_send(&to_send, bus_num, false);
 }
 
 static uint32_t radar_VIN_char(int pos, int shift) {
@@ -210,7 +210,7 @@ static void activate_tesla_radar(uint32_t RIR, uint32_t RDTR) {
         //send 2A9
         MLB = 0x41431642;
         MHB = 0x10020000 | (radarPosition << 4) | (radarEpasType << 12);
-        if ((sizeof(radar_VIN) >= 4) && ((int)(radar_VIN[7]) == 0x34)) {
+        if ((sizeof(radar_VIN) >= 4) && ((int)(radar_VIN[7]) == 0x32)) {
             //also change to AWD if needed (most likely) if manual VIN and if position 8 of VIN is a 2 (dual motor)
             MLB = MLB | 0x08;
         }
@@ -242,7 +242,7 @@ static void teslaradar_rx_hook(CAN_FIFOMailBox_TypeDef *to_push)
     addr = to_push->RIR >> 21;
   }
 
-  if ((addr == tesla_radar_trigger_message_id) && (bus_number == 1) && (tesla_radar_trigger_message_id > 0)) {
+  if ((addr == tesla_radar_trigger_message_id) && (tesla_radar_trigger_message_id > 0)) {
     activate_tesla_radar(to_push->RIR,to_push->RDTR);
     return;
   }
@@ -258,14 +258,13 @@ static void teslaradar_rx_hook(CAN_FIFOMailBox_TypeDef *to_push)
       puts("Tesla Radar Active! \n");
       tesla_last_radar_signal = ts;
     } else
-    if (((int)ts_elapsed > TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
+    if ((ts_elapsed > TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
       tesla_radar_status = 0;
       puts("Tesla Radar Inactive! (timeout 1) \n");
     } else
-    if (((int)ts_elapsed <= TESLA_RADAR_TIMEOUT) && (tesla_radar_status == 2)) {
+    if ((ts_elapsed <= TESLA_RADAR_TIMEOUT) && (tesla_radar_status == 2)) {
       tesla_last_radar_signal = ts;
     }
-    return;
   }
 
   //0x631 is sent by radar to initiate the sync
@@ -278,11 +277,11 @@ static void teslaradar_rx_hook(CAN_FIFOMailBox_TypeDef *to_push)
       tesla_last_radar_signal = ts;
       puts("Tesla Radar Initializing... \n");
     } else
-    if (((int)ts_elapsed > TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
+    if ((ts_elapsed > TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
       tesla_radar_status = 0;
       puts("Tesla Radar Inactive! (timeout 2) \n");
     } else
-    if (((int)ts_elapsed <= TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
+    if ((ts_elapsed <= TESLA_RADAR_TIMEOUT) && (tesla_radar_status > 0)) {
       tesla_last_radar_signal = ts;
     }
     return;

@@ -406,23 +406,15 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
 }
 
 static int honda_bosch_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
-  int bus_fwd = -1;
-  int bus_rdr_cam = (honda_hw == HONDA_BH_HW) ? 2 : 1;  // radar bus, camera side
-  int bus_rdr_car = (honda_hw == HONDA_BH_HW) ? 0 : 2;  // radar bus, car side
-
-  if (!relay_malfunction) {
-    if (bus_num == bus_rdr_car) {
-      bus_fwd = -1;
-    }
-    if (bus_num == bus_rdr_cam)  {
-      int addr = GET_ADDR(to_fwd);
-      int is_lkas_msg = (addr == 0xE4) || (addr == 0xE5) || (addr == 0x33D);
-      if (!is_lkas_msg) {
-        bus_fwd = 0;
-      }
-    }
+  return -1;
+  if(bus_num == 2) {
+    return -1;
   }
-  return bus_fwd;
+  if (bus_num == 1 || bus_num == 2) {
+    int addr = to_fwd->RIR>>21;
+    return addr != 0xE4 && addr != 0x33D ? (uint8_t)(~bus_num & 0x3) : -1;
+  }
+  return -1;
 }
 
 const safety_hooks honda_nidec_hooks = {

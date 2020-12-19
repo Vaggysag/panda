@@ -107,7 +107,7 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
 
     //speed for radar
     if (addr == 0x309) {
-      actual_speed_kph = (uint16_t)(((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
+      actual_speed_kph = (((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
     }
 
     // state machine to enter and exit controls
@@ -210,7 +210,7 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
     int radarVin_b7 = ((to_send->RDHR >> 24) & 0xFF);
     if (id == 0) {
       tesla_radar_should_send = (radarVin_b2 & 0x01);
-      radarPosition =  ((radarVin_b2 >> 1) & 0x03);
+      radarPosition = ((radarVin_b2 >> 1) & 0x03);
       radarEpasType = ((radarVin_b2 >> 3) & 0x07);
       tesla_radar_trigger_message_id = (radarVin_b3 << 8) + radarVin_b4;
       tesla_radar_can = radarVin_b1;
@@ -218,6 +218,7 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
       radar_VIN[1] = radarVin_b6;
       radar_VIN[2] = radarVin_b7;
       tesla_radar_vin_complete = tesla_radar_vin_complete | 1;
+      return 1;
     }
     if (id == 1) {
       radar_VIN[3] = radarVin_b1;
@@ -228,6 +229,7 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
       radar_VIN[8] = radarVin_b6;
       radar_VIN[9] = radarVin_b7;
       tesla_radar_vin_complete = tesla_radar_vin_complete | 2;
+      return 1;
     }
     if (id == 2) {
       radar_VIN[10] = radarVin_b1;
@@ -238,6 +240,7 @@ static int honda_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
       radar_VIN[15] = radarVin_b6;
       radar_VIN[16] = radarVin_b7;
       tesla_radar_vin_complete = tesla_radar_vin_complete | 4;
+      return 1;
     }
     else {
       return 0;
@@ -388,7 +391,7 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
 
   if (!relay_malfunction) {
     if (bus_num == 0) {
-      bus_fwd = 2;
+      bus_fwd = -1;
     }
     if (bus_num == 2) {
       // block stock lkas messages and stock acc messages (if OP is doing ACC)
@@ -398,7 +401,7 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
       bool is_brake_msg = addr == 0x1FA;
       bool block_fwd = is_lkas_msg || is_acc_hud_msg || (is_brake_msg && !honda_fwd_brake);
       if (!block_fwd) {
-        bus_fwd = 0;
+        bus_fwd = -1;
       }
     }
   }
@@ -406,15 +409,27 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
 }
 
 static int honda_bosch_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
-  return -1;
-  if(bus_num == 2) {
-    return -1;
+  int bus_fwd = -1;
+
+  // don't forward if we're using tesla radar
+  if (tesla_radar_should_send == 0) {
+    int bus_rdr_cam = (honda_hw == HONDA_BH_HW) ? 2 : 1;  // radar bus, camera side
+    int bus_rdr_car = (honda_hw == HONDA_BH_HW) ? 0 : 2;  // radar bus, car side
+
+    if (!relay_malfunction) {
+      if (bus_num == bus_rdr_car) {
+        bus_fwd = bus_rdr_cam;
+      }
+      if (bus_num == bus_rdr_cam)  {
+        int addr = GET_ADDR(to_fwd);
+        int is_lkas_msg = (addr == 0xE4) || (addr == 0xE5) || (addr == 0x33D);
+        if (!is_lkas_msg) {
+          bus_fwd = bus_rdr_car;
+        }
+      }
+    }
   }
-  if (bus_num == 1 || bus_num == 2) {
-    int addr = to_fwd->RIR>>21;
-    return addr != 0xE4 && addr != 0x33D ? (uint8_t)(~bus_num & 0x3) : -1;
-  }
-  return -1;
+  return bus_fwd;
 }
 
 const safety_hooks honda_nidec_hooks = {

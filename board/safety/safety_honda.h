@@ -105,7 +105,7 @@ static int honda_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
       vehicle_moving = GET_BYTE(to_push, 0) | GET_BYTE(to_push, 1);
     }
 
-    //speed for radar
+    //speed for radar TODO: do we need this?
     if (addr == 0x309) {
       actual_speed_kph = GET_BYTE(to_push, 0) | GET_BYTE(to_push, 1);
       // (((GET_BYTE(to_push, 0) << 8) + GET_BYTE(to_push, 1)) * 0.01);
@@ -392,7 +392,7 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
 
   if (!relay_malfunction) {
     if (bus_num == 0) {
-      bus_fwd = -1;
+      bus_fwd = 2;
     }
     if (bus_num == 2) {
       // block stock lkas messages and stock acc messages (if OP is doing ACC)
@@ -402,7 +402,7 @@ static int honda_nidec_fwd_hook(int bus_num, CAN_FIFOMailBox_TypeDef *to_fwd) {
       bool is_brake_msg = addr == 0x1FA;
       bool block_fwd = is_lkas_msg || is_acc_hud_msg || (is_brake_msg && !honda_fwd_brake);
       if (!block_fwd) {
-        bus_fwd = -1;
+        bus_fwd = 0;
       }
     }
   }
